@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Murder Mystery Lite</title>
+  <style>
+    body{margin:0;font-family:system-ui;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;padding:12px}
+    .app{width:min(96vw,760px);background:#141a2e;border-radius:14px;padding:14px}
+    h1{margin:0 0 6px}
+    .muted{color:#aab4d6}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,button,input{border:none;border-radius:10px;padding:8px 10px;background:#334155;color:#fff}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:10px}
+    .card{background:#1f2937;border-radius:10px;padding:10px}
+    .sus{padding:8px;border-radius:8px;background:#111827;margin:6px 0;cursor:pointer}
+    .sus.active{outline:2px solid #60a5fa}
+    .chat{height:260px;overflow:auto;background:#0f172a;border-radius:8px;padding:8px}
+    .line{margin:6px 0}
+    .you{color:#93c5fd}.them{color:#f9a8d4}.sys{color:#86efac}
+    .small{font-size:.88rem}
+    .tag{display:inline-block;padding:3px 8px;border-radius:999px;background:#334155;margin-right:6px}
+    @media (max-width:780px){.grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>🕵️ Murder Mystery Lite</h1>
+  <div class="row small muted">
+    <span>Works for 1 / 2 / 3 humans (missing players are AI).</span>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <label>Humans</label>
+    <select id="humans"><option>1</option><option>2</option><option>3</option></select>
+    <button id="newCase">New Case</button>
+    <button id="reveal">Reveal Killer</button>
+  </div>
+
+  <div id="meta" class="small muted" style="margin-top:8px"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 style="margin:0 0 6px">Suspects</h3>
+      <div id="suspects"></div>
+      <div class="small muted">Tip: Ask about alibi, motive, and timeline.</div>
+      <div style="margin-top:10px">
+        <h4 style="margin:0 0 6px">Your notes</h4>
+        <textarea id="notes" style="width:100%;min-height:80px;border-radius:8px;background:#0f172a;color:#fff;border:none;padding:8px"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 6px">Interrogation</h3>
+      <div id="chat" class="chat"></div>
+      <div class="row" style="margin-top:8px">
+        <input id="q" placeholder="Ask selected suspect..." style="flex:1"/>
+        <button id="ask">Ask</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <label>Accuse:</label>
+        <select id="accuse"></select>
+        <button id="accuseBtn">Submit Accusation</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const NAMES=["Alex","Sam","Jordan","Casey","Morgan","Riley","Taylor","Jamie"];
+const ROLES=["Chef","Producer","Engineer","Designer","Teacher","Actor","Doctor","Journalist"];
+const MOTIVES=["money trouble","jealousy","career rivalry","secret affair","blackmail","inheritance dispute"];
+const ALIBIS=["was on a call","was in the kitchen","was outside smoking","was in the restroom","was in the lobby","was checking messages"];
+const TICKS=["18:30 arrival","19:10 argument heard","19:40 power cut","20:05 victim found"];
+
+let state={suspects:[],killer:null,selected:0,revealed:false};
+
+function pick(arr){return arr[Math.floor(Math.random()*arr.length)]}
+function uniq(arr,n){const s=[...arr].sort(()=>Math.random()-0.5);return s.slice(0,n)}
+function line(cls,t){const d=document.createElement('div');d.className='line '+cls;d.textContent=t;chat.appendChild(d);chat.scrollTop=chat.scrollHeight;}
+
+function createCase(){
+  const names=uniq(NAMES,4);
+  const suspects=names.map(n=>(
+    {name:n,role:pick(ROLES),motive:pick(MOTIVES),alibi:pick(ALIBIS),nervous:Math.random()>.5,consistency:Math.random()}
+  ));
+  const k=Math.floor(Math.random()*suspects.length);
+  state={suspects,killer:k,selected:0,revealed:false};
+
+  const humanCount=Number(humans.value);
+  const aiCount=Math.max(0,3-humanCount);
+  meta.textContent=`Case generated. Players: ${humanCount} human + ${aiCount} AI detectives. Timeline: ${TICKS.join(' • ')}`;
+
+  renderSuspects();
+  chat.innerHTML='';
+  line('sys','New case started. Interrogate suspects and submit your accusation.');
+}
+
+function renderSuspects(){
+  suspects.innerHTML='';
+  accuse.innerHTML='';
+  state.suspects.forEach((s,i)=>{
+    const d=document.createElement('div');
+    d.className='sus'+(i===state.selected?' active':'');
+    d.innerHTML=`<b>${s.name}</b> <span class="tag">${s.role}</span>`;
+    d.onclick=()=>{state.selected=i;renderSuspects();line('sys',`Now questioning ${s.name}.`) };
+    suspects.appendChild(d);
+
+    const o=document.createElement('option');o.value=i;o.textContent=s.name;accuse.appendChild(o);
+  });
+}
+
+function aiReply(q,s,idx){
+  const lower=q.toLowerCase();
+  const guilty = idx===state.killer;
+  if(lower.includes('alibi')) return `I ${s.alibi} around that time.`;
+  if(lower.includes('motive')||lower.includes('why')) return guilty?`People think I had ${s.motive}, but that's exaggerated.`:`I had no reason. Maybe someone with ${s.motive}.`;
+  if(lower.includes('when')||lower.includes('time')) return `I remember ${pick(TICKS)}.`;
+  if(lower.includes('where')) return `Near the main hall. Not in the victim's room.`;
+  if(guilty && Math.random()>.5) return `You're twisting my words. I already told you what happened.`;
+  return [
+    `I don't know anything else.`,
+    `Ask me about my alibi.`,
+    `I was busy with my own work.`,
+    `You're focusing on the wrong person.`
+  ][Math.floor(Math.random()*4)];
+}
+
+ask.onclick=()=>{
+  const text=q.value.trim(); if(!text) return;
+  const i=state.selected; const s=state.suspects[i];
+  line('you',`You → ${s.name}: ${text}`);
+  line('them',`${s.name}: ${aiReply(text,s,i)}`);
+  q.value='';
+};
+q.addEventListener('keydown',e=>{if(e.key==='Enter') ask.onclick()});
+
+accuseBtn.onclick=()=>{
+  const i=Number(accuse.value);
+  if(i===state.killer){
+    line('sys',`✅ Correct. ${state.suspects[i].name} is the killer.`);
+  }else{
+    line('sys',`❌ Wrong accusation. ${state.suspects[i].name} is not the killer.`);
+  }
+};
+
+reveal.onclick=()=>{
+  if(state.revealed) return;
+  state.revealed=true;
+  const k=state.suspects[state.killer];
+  line('sys',`🔎 Reveal: ${k.name} (${k.role}) did it. Suggested motive: ${k.motive}.`);
+};
+
+newCase.onclick=createCase;
+createCase();
+</script>
+</body>
+</html>

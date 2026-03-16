@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dots & Boxes (3 Players)</title>
+  <style>
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0b1020;color:#e5e7eb;display:grid;place-items:center;min-height:100vh;padding:12px}
+    .app{width:min(95vw,700px);background:#141a2e;border-radius:14px;padding:14px}
+    h1{margin:0 0 10px;font-size:1.3rem}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,button{border:none;border-radius:10px;padding:8px 10px;background:#334155;color:#fff;font-weight:600}
+    #status{margin:10px 0;color:#aab4d6}
+    #board{margin-top:8px;display:grid;gap:0;touch-action:manipulation;user-select:none}
+    .cell{position:relative}
+    .dot{width:10px;height:10px;background:#fff;border-radius:50%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%)}
+    .hEdge,.vEdge{position:absolute;background:#334155;cursor:pointer;transition:background .15s}
+    .hEdge{height:8px;left:50%;top:50%;transform:translate(-50%,-50%)}
+    .vEdge{width:8px;left:50%;top:50%;transform:translate(-50%,-50%)}
+    .hEdge:hover,.vEdge:hover{background:#475569}
+    .taken{cursor:default}
+    .box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:6px;display:grid;place-items:center;font-weight:800}
+    .p1{background:#60a5fa88;color:#dbeafe}
+    .p2{background:#f472b688;color:#fce7f3}
+    .p3{background:#34d39988;color:#d1fae5}
+    .score{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+    .chip{padding:6px 9px;border-radius:999px;font-size:.9rem;background:#1f2937}
+    .chip b{margin-left:4px}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Dots & Boxes (up to 3 players)</h1>
+    <div class="row">
+      <label>Mode</label>
+      <select id="mode">
+        <option value="1">1 Human + 2 AI</option>
+        <option value="2">2 Humans + 1 AI</option>
+        <option value="3">3 Humans</option>
+      </select>
+      <label>Grid</label>
+      <select id="size">
+        <option value="4">4 x 4 boxes</option>
+        <option value="5">5 x 5 boxes</option>
+      </select>
+      <button id="newGame">New Game</button>
+      <div class="score" id="score"></div>
+    </div>
+    <div id="status"></div>
+    <div id="board"></div>
+  </div>
+
+<script>
+(() => {
+  const P = [1,2,3];
+  const playerName = {1:'P1',2:'P2',3:'P3'};
+  const isAI = {1:false,2:false,3:false};
+  let size = 4; // boxes per row/col
+  let hEdges, vEdges, boxes, turn, finished;
+
+  const modeEl = document.getElementById('mode');
+  const sizeEl = document.getElementById('size');
+  const boardEl = document.getElementById('board');
+  const scoreEl = document.getElementById('score');
+  const statusEl = document.getElementById('status');
+
+  function setMode() {
+    const m = Number(modeEl.value);
+    if (m === 1) { isAI[1]=false; isAI[2]=true; isAI[3]=true; }
+    if (m === 2) { isAI[1]=false; isAI[2]=false; isAI[3]=true; }
+    if (m === 3) { isAI[1]=false; isAI[2]=false; isAI[3]=false; }
+  }
+
+  function newGame() {
+    setMode();
+    size = Number(sizeEl.value);
+    hEdges = Array.from({length:size+1},()=>Array(size).fill(0));
+    vEdges = Array.from({length:size},()=>Array(size+1).fill(0));
+    boxes = Array.from({length:size},()=>Array(size).fill(0));
+    turn = 1;
+    finished = false;
+    render();
+    maybeAIMove();
+  }
+
+  function scores() {
+    const s = {1:0,2:0,3:0};
+    for(let r=0;r<size;r++) for(let c=0;c<size;c++) if(boxes[r][c]) s[boxes[r][c]]++;
+    return s;
+  }
+
+  function nextTurn(t){ return t===3?1:t+1; }
+
+  function closeBoxesByEdge(kind,r,c,p) {
+    let gained = 0;
+    const candidates = [];
+    if (kind==='h') {
+      if (r>0) candidates.push([r-1,c]);
+      if (r<size) candidates.push([r,c]);
+    } else {
+      if (c>0) candidates.push([r,c-1]);
+      if (c<size) candidates.push([r,c]);
+    }
+    for (const [br,bc] of candidates) {
+      if (br<0||bc<0||br>=size||bc>=size||boxes[br][bc]) continue;
+      const top = hEdges[br][bc], bottom = hEdges[br+1][bc], left=vEdges[br][bc], right=vEdges[br][bc+1];
+      if (top&&bottom&&left&&right) { boxes[br][bc]=p; gained++; }
+    }
+    return gained;
+  }
+
+  function allMoves() {
+    const moves=[];
+    for(let r=0;r<size+1;r++) for(let c=0;c<size;c++) if(!hEdges[r][c]) moves.push({k:'h',r,c});
+    for(let r=0;r<size;r++) for(let c=0;c<size+1;c++) if(!vEdges[r][c]) moves.push({k:'v',r,c});
+    return moves;
+  }
+
+  function edgeWouldCreateThirdSide(move) {
+    // risky move heuristic for AI: creates a box with 3 sides for opponent.
+    const candidateBoxes = [];
+    if(move.k==='h') { if(move.r>0) candidateBoxes.push([move.r-1,move.c]); if(move.r<size) candidateBoxes.push([move.r,move.c]); }
+    else { if(move.c>0) candidateBoxes.push([move.r,move.c-1]); if(move.c<size) candidateBoxes.push([move.r,move.c]); }
+
+    for(const [br,bc] of candidateBoxes){
+      if(br<0||bc<0||br>=size||bc>=size||boxes[br][bc]) continue;
+      let count=0;
+      count += hEdges[br][bc]?1:0;
+      count += hEdges[br+1][bc]?1:0;
+      count += vEdges[br][bc]?1:0;
+      count += vEdges[br][bc+1]?1:0;
+      // If this move is one of the sides, increment prospective count
+      if(move.k==='h' && ((move.r===br&&move.c===bc)||(move.r===br+1&&move.c===bc))) count++;
+      if(move.k==='v' && ((move.r===br&&move.c===bc)||(move.r===br&&move.c===bc+1))) count++;
+      if(count===3) return true;
+    }
+    return false;
+  }
+
+  function applyMove(move) {
+    if(finished) return;
+    if(move.k==='h'){ if(hEdges[move.r][move.c]) return; hEdges[move.r][move.c]=turn; }
+    else { if(vEdges[move.r][move.c]) return; vEdges[move.r][move.c]=turn; }
+
+    const gained = closeBoxesByEdge(move.k,move.r,move.c,turn);
+    if (!gained) turn = nextTurn(turn);
+
+    if (allMoves().length===0) finished = true;
+    render();
+    maybeAIMove();
+  }
+
+  function aiChooseMove() {
+    const moves = allMoves();
+    if(!moves.length) return null;
+
+    // 1) take immediate scoring moves
+    for(const m of moves){
+      // simulate quickly by checking if closes any box
+      const cloneTop = JSON.parse(JSON.stringify(hEdges));
+      const cloneSide = JSON.parse(JSON.stringify(vEdges));
+      const cloneBoxes = JSON.parse(JSON.stringify(boxes));
+      if(m.k==='h') cloneTop[m.r][m.c]=turn; else cloneSide[m.r][m.c]=turn;
+      let gained=0;
+      const cand=[];
+      if(m.k==='h'){ if(m.r>0) cand.push([m.r-1,m.c]); if(m.r<size) cand.push([m.r,m.c]); }
+      else { if(m.c>0) cand.push([m.r,m.c-1]); if(m.c<size) cand.push([m.r,m.c]); }
+      for(const [br,bc] of cand){
+        if(br<0||bc<0||br>=size||bc>=size||cloneBoxes[br][bc]) continue;
+        const t=cloneTop[br][bc], b=cloneTop[br+1][bc], l=cloneSide[br][bc], r=cloneSide[br][bc+1];
+        if(t&&b&&l&&r) gained++;
+      }
+      if(gained>0) return m;
+    }
+
+    // 2) prefer safe moves (don't create 3rd side)
+    const safe = moves.filter(m=>!edgeWouldCreateThirdSide(m));
+    if(safe.length) return safe[Math.floor(Math.random()*safe.length)];
+
+    // 3) otherwise any move
+    return moves[Math.floor(Math.random()*moves.length)];
+  }
+
+  function maybeAIMove() {
+    if(finished) return;
+    if(!isAI[turn]) return;
+    setTimeout(()=>{
+      if(finished || !isAI[turn]) return;
+      const m = aiChooseMove();
+      if(m) applyMove(m);
+    }, 260);
+  }
+
+  function render() {
+    const gap = 8;
+    const dot = 10;
+    const edgeLen = 54;
+    const step = edgeLen + gap;
+
+    const grid = size*2 + 1;
+    boardEl.style.gridTemplateColumns = `repeat(${grid}, ${dot}px ${edgeLen}px)`.replace(/\s\d+px\s\d+px$/,` ${dot}px`);
+
+    // Easier explicit render with css grid cells
+    boardEl.innerHTML='';
+    boardEl.style.gridTemplateColumns = `repeat(${grid}, ${step}px)`;
+    boardEl.style.gridAutoRows = `${step}px`;
+
+    for(let gr=0; gr<grid; gr++){
+      for(let gc=0; gc<grid; gc++){
+        const cell = document.createElement('div');
+        cell.className='cell';
+        cell.style.width = step+'px';
+        cell.style.height = step+'px';
+
+        const isDot = gr%2===0 && gc%2===0;
+        const isHEdge = gr%2===0 && gc%2===1;
+        const isVEdge = gr%2===1 && gc%2===0;
+        const isBox = gr%2===1 && gc%2===1;
+
+        if(isDot){
+          const d = document.createElement('div'); d.className='dot'; cell.appendChild(d);
+        }
+        if(isHEdge){
+          const r = gr/2, c = (gc-1)/2;
+          const e = document.createElement('div');
+          e.className='hEdge'+(hEdges[r][c]?' taken p'+hEdges[r][c]:'');
+          e.style.width = edgeLen+'px';
+          if(hEdges[r][c]) e.style.background = ['','#60a5fa','#f472b6','#34d399'][hEdges[r][c]];
+          if(!hEdges[r][c]) e.onclick = ()=>applyMove({k:'h',r,c});
+          cell.appendChild(e);
+        }
+        if(isVEdge){
+          const r = (gr-1)/2, c = gc/2;
+          const e = document.createElement('div');
+          e.className='vEdge'+(vEdges[r][c]?' taken p'+vEdges[r][c]:'');
+          e.style.height = edgeLen+'px';
+          if(vEdges[r][c]) e.style.background = ['','#60a5fa','#f472b6','#34d399'][vEdges[r][c]];
+          if(!vEdges[r][c]) e.onclick = ()=>applyMove({k:'v',r,c});
+          cell.appendChild(e);
+        }
+        if(isBox){
+          const r=(gr-1)/2, c=(gc-1)/2;
+          if(boxes[r][c]){
+            const b = document.createElement('div');
+            b.className='box p'+boxes[r][c];
+            b.style.width=edgeLen+'px'; b.style.height=edgeLen+'px';
+            b.textContent = playerName[boxes[r][c]];
+            cell.appendChild(b);
+          }
+        }
+
+        boardEl.appendChild(cell);
+      }
+    }
+
+    const s=scores();
+    scoreEl.innerHTML = `
+      <span class="chip" style="border:1px solid #60a5fa">P1 <b>${s[1]}</b></span>
+      <span class="chip" style="border:1px solid #f472b6">P2 <b>${s[2]}</b></span>
+      <span class="chip" style="border:1px solid #34d399">P3 <b>${s[3]}</b></span>
+    `;
+
+    if(finished){
+      const max = Math.max(s[1],s[2],s[3]);
+      const winners = P.filter(p=>s[p]===max);
+      statusEl.textContent = winners.length>1 ? `Draw between ${winners.map(w=>playerName[w]).join(' & ')}` : `${playerName[winners[0]]} wins!`;
+    } else {
+      statusEl.textContent = `${playerName[turn]} turn${isAI[turn]?' (AI)':''}`;
+    }
+  }
+
+  document.getElementById('newGame').onclick = newGame;
+  modeEl.onchange = newGame;
+  sizeEl.onchange = newGame;
+  newGame();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tic-Tac-Toe Pro</title>
+  <style>
+    :root{
+      --bg:#0b1020; --card:#141a2e; --tile:#1e2742; --text:#ecf1ff; --muted:#aab4d6;
+      --x:#60a5fa; --o:#f472b6; --accent:#34d399;
+    }
+    :root.light{
+      --bg:#eef2ff; --card:#ffffff; --tile:#eef3ff; --text:#111827; --muted:#5b6479;
+      --x:#2563eb; --o:#db2777; --accent:#059669;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; display:grid; place-items:center;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:radial-gradient(1200px 700px at 15% 10%, #1a2452 0%, var(--bg) 55%);
+      color:var(--text);
+      padding:14px;
+    }
+    .app{
+      width:min(95vw,460px); background:var(--card); border-radius:16px;
+      box-shadow:0 12px 35px rgba(0,0,0,.28); padding:14px;
+    }
+    h1{margin:4px 0 8px; font-size:1.35rem}
+    .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+    .status{margin:2px 0 10px; color:var(--muted); min-height:22px; padding:8px 10px; border-radius:10px; border:1px solid #334155}
+    .status.turn-x{background:color-mix(in oklab, var(--x) 18%, transparent); color:var(--text)}
+    .status.turn-o{background:color-mix(in oklab, var(--o) 18%, transparent); color:var(--text)}
+    .board{display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0 10px}
+    .cell{
+      aspect-ratio:1/1; border:none; border-radius:12px; cursor:pointer;
+      background:var(--tile); color:var(--text); font-size:2.4rem; font-weight:800;
+      transition:transform .08s ease, filter .2s ease;
+    }
+    .cell:hover{filter:brightness(1.05)}
+    .cell:active{transform:scale(.97)}
+    .cell.x{color:var(--x)} .cell.o{color:var(--o)}
+    .btn, select{
+      border:none; border-radius:10px; padding:9px 12px; font-weight:650; cursor:pointer;
+      background:#2b3a74; color:#fff;
+    }
+    .btn.secondary{background:#334155}
+    .btn.ghost{background:transparent; border:1px solid #64748b; color:var(--text)}
+    .score{
+      display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:6px;
+    }
+    .chip{background:var(--tile); border-radius:10px; padding:8px; text-align:center}
+    .chip b{display:block; font-size:1.05rem; margin-top:2px}
+    .tiny{font-size:.85rem; color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>🎮 Tic-Tac-Toe Pro</h1>
+
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+        <label class="tiny">Mode</label>
+        <select id="mode">
+          <option value="pvp">2 Players</option>
+          <option value="ai">Vs Computer</option>
+        </select>
+      </div>
+      <button id="theme" class="btn ghost">Toggle Theme</button>
+    </div>
+
+    <p class="status" id="status"></p>
+
+    <div class="board" id="board"></div>
+
+    <div class="row">
+      <button class="btn" id="newRound">New Round</button>
+      <button class="btn secondary" id="resetScore">Reset Score</button>
+    </div>
+
+    <div class="score">
+      <div class="chip">X Wins<b id="sx">0</b></div>
+      <div class="chip">Draws<b id="sd">0</b></div>
+      <div class="chip">O Wins<b id="so">0</b></div>
+    </div>
+    <p class="tiny" id="selftest"></p>
+  </div>
+
+  <script>
+    const boardEl = document.getElementById('board');
+    const statusEl = document.getElementById('status');
+    const modeEl = document.getElementById('mode');
+    const sxEl = document.getElementById('sx');
+    const soEl = document.getElementById('so');
+    const sdEl = document.getElementById('sd');
+
+    const winLines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+    let board = Array(9).fill('');
+    let turn = 'X';
+    let over = false;
+
+    const loadScore = () => JSON.parse(localStorage.getItem('ttt-score') || '{"X":0,"O":0,"D":0}');
+    const saveScore = (s) => localStorage.setItem('ttt-score', JSON.stringify(s));
+    let score = loadScore();
+
+    function drawScore(){ sxEl.textContent = score.X; soEl.textContent = score.O; sdEl.textContent = score.D; }
+
+    function winnerOf(b){
+      for(const [a,b2,c] of winLines){ if(b[a] && b[a]===b[b2] && b[b2]===b[c]) return b[a]; }
+      return b.every(Boolean) ? 'D' : null;
+    }
+
+    function render(){
+      boardEl.innerHTML = '';
+      board.forEach((v,i)=>{
+        const btn = document.createElement('button');
+        btn.className = 'cell ' + (v ? v.toLowerCase() : '');
+        btn.textContent = v;
+        btn.onclick = ()=> play(i);
+        boardEl.appendChild(btn);
+      });
+    }
+
+    function setStatus(txt, who=null){
+      statusEl.textContent = txt;
+      statusEl.classList.remove('turn-x','turn-o');
+      if(who === 'X') statusEl.classList.add('turn-x');
+      if(who === 'O') statusEl.classList.add('turn-o');
+    }
+
+    function endRound(result){
+      over = true;
+      if(result === 'D'){ score.D++; setStatus("It's a draw 🤝"); }
+      else { score[result]++; setStatus(`Player ${result} wins 🎉`); }
+      saveScore(score); drawScore();
+    }
+
+    function play(i){
+      if(over || board[i]) return;
+      board[i] = turn;
+      render();
+
+      const res = winnerOf(board);
+      if(res) return endRound(res);
+
+      turn = (turn === 'X') ? 'O' : 'X';
+      setStatus(modeEl.value === 'ai' && turn === 'O' ? "Computer is thinking…" : `Player ${turn}'s turn`, turn);
+
+      if(modeEl.value === 'ai' && turn === 'O' && !over){
+        setTimeout(()=>{
+          const move = bestMove(board);
+          if(move !== -1) play(move);
+        }, 280);
+      }
+    }
+
+    function bestMove(b){
+      // unbeatable minimax for O
+      let best = -Infinity, idx = -1;
+      for(let i=0;i<9;i++){
+        if(!b[i]){
+          b[i]='O';
+          const val = minimax(b, false);
+          b[i]='';
+          if(val > best){ best = val; idx = i; }
+        }
+      }
+      return idx;
+    }
+
+    function minimax(b, isMax){
+      const r = winnerOf(b);
+      if(r === 'O') return 10;
+      if(r === 'X') return -10;
+      if(r === 'D') return 0;
+
+      if(isMax){
+        let best = -Infinity;
+        for(let i=0;i<9;i++) if(!b[i]){ b[i]='O'; best = Math.max(best, minimax(b,false)); b[i]=''; }
+        return best;
+      } else {
+        let best = Infinity;
+        for(let i=0;i<9;i++) if(!b[i]){ b[i]='X'; best = Math.min(best, minimax(b,true)); b[i]=''; }
+        return best;
+      }
+    }
+
+    function newRound(){
+      board = Array(9).fill(''); turn='X'; over=false;
+      render();
+      setStatus(modeEl.value === 'ai' ? "Your turn (X)" : "Player X's turn", 'X');
+    }
+
+    document.getElementById('newRound').onclick = newRound;
+    document.getElementById('resetScore').onclick = ()=>{ score={X:0,O:0,D:0}; saveScore(score); drawScore(); newRound(); };
+    modeEl.onchange = newRound;
+
+    document.getElementById('theme').onclick = ()=>{
+      document.documentElement.classList.toggle('light');
+      localStorage.setItem('ttt-theme', document.documentElement.classList.contains('light') ? 'light':'dark');
+    };
+
+    // startup
+    if(localStorage.getItem('ttt-theme') === 'light') document.documentElement.classList.add('light');
+    drawScore(); newRound();
+
+    // tiny self-test
+    try{
+      const t = ['X','X','X','','','','','',''];
+      const ok = winnerOf(t) === 'X' && bestMove(['X','','','','O','','','','']) !== -1;
+      document.getElementById('selftest').textContent = ok ? 'Self-test: OK ✅' : 'Self-test: check logic ⚠️';
+    }catch{ document.getElementById('selftest').textContent = 'Self-test: skipped'; }
+  </script>
+</body>
+</html>

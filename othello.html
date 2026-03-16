@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Othello (Reversi)</title>
+  <style>
+    body{margin:0;font-family:system-ui;background:#0f172a;color:#e2e8f0;display:grid;place-items:center;min-height:100vh}
+    .app{width:min(96vw,560px);background:#111827;border-radius:14px;padding:14px}
+    h1{margin:0 0 8px;font-size:1.25rem}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    #board{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;margin:12px 0}
+    .cell{aspect-ratio:1;border:none;border-radius:6px;background:#166534;position:relative;cursor:pointer}
+    .cell.valid::after{content:'';position:absolute;inset:35%;border-radius:50%;background:#86efac88}
+    .disc{position:absolute;inset:10%;border-radius:50%}
+    .b{background:#111}.w{background:#f8fafc}
+    button,select{background:#334155;color:#fff;border:none;border-radius:8px;padding:8px 10px}
+    .score{margin-left:auto}
+  </style>
+</head>
+<body>
+<div class="app">
+  <h1>Othello / Reversi</h1>
+  <div class="row">
+    <label>Mode</label>
+    <select id="mode"><option value="pvp">2 players</option><option value="ai">vs computer</option></select>
+    <button id="new">New game</button>
+    <div class="score" id="score"></div>
+  </div>
+  <div id="status"></div>
+  <div id="board"></div>
+</div>
+<script>
+const E=0,B=1,W=2,dirs=[[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+let board,turn,mode='pvp',over=false;
+const boardEl=document.getElementById('board'),statusEl=document.getElementById('status'),scoreEl=document.getElementById('score');
+function init(){board=Array.from({length:8},()=>Array(8).fill(E));board[3][3]=W;board[3][4]=B;board[4][3]=B;board[4][4]=W;turn=B;over=false;render();maybeAIMove();}
+function inb(r,c){return r>=0&&r<8&&c>=0&&c<8}
+function flipsFor(b,r,c,p){if(b[r][c]!==E)return[];const o=p===B?W:B;let all=[];for(const[dR,dC]of dirs){let rr=r+dR,cc=c+dC,line=[];while(inb(rr,cc)&&b[rr][cc]===o){line.push([rr,cc]);rr+=dR;cc+=dC;}if(line.length&&inb(rr,cc)&&b[rr][cc]===p)all=all.concat(line);}return all}
+function validMoves(b,p){const m=[];for(let r=0;r<8;r++)for(let c=0;c<8;c++){const f=flipsFor(b,r,c,p);if(f.length)m.push({r,c,flips:f});}return m}
+function applyMove(b,m,p){b[m.r][m.c]=p;for(const[r,c]of m.flips)b[r][c]=p}
+function count(){let b=0,w=0;for(const row of board)for(const v of row){if(v===B)b++;if(v===W)w++;}return{b,w}}
+function passOrEnd(){const mine=validMoves(board,turn);if(mine.length)return false;const other=validMoves(board,turn===B?W:B);if(other.length){turn=turn===B?W:B;statusEl.textContent=`No moves for ${turn===B?'White':'Black'}?`;return false;}over=true;return true}
+function render(){boardEl.innerHTML='';const valids=validMoves(board,turn);const set=new Set(valids.map(m=>m.r+','+m.c));for(let r=0;r<8;r++)for(let c=0;c<8;c++){const btn=document.createElement('button');btn.className='cell'+(set.has(r+','+c)?' valid':'');btn.onclick=()=>play(r,c);const v=board[r][c];if(v!==E){const d=document.createElement('div');d.className='disc '+(v===B?'b':'w');btn.appendChild(d);}boardEl.appendChild(btn);}const {b,w}=count();scoreEl.textContent=`Black ${b} • White ${w}`;if(over){statusEl.textContent=b===w?'Draw!':(b>w?'Black wins!':'White wins!');}else statusEl.textContent=`Turn: ${turn===B?'Black':'White'}`}
+function play(r,c){if(over)return;const m=validMoves(board,turn).find(x=>x.r===r&&x.c===c);if(!m)return;applyMove(board,m,turn);turn=turn===B?W:B;if(passOrEnd()){}render();maybeAIMove();}
+function maybeAIMove(){if(over||mode!=='ai'||turn!==W)return;setTimeout(()=>{const moves=validMoves(board,W);if(!moves.length){turn=B;passOrEnd();render();return;}const scoreMove=m=>m.flips.length+((m.r===0||m.r===7)&&(m.c===0||m.c===7)?10:0)+((m.r===0||m.r===7||m.c===0||m.c===7)?2:0);moves.sort((a,b)=>scoreMove(b)-scoreMove(a));applyMove(board,moves[0],W);turn=B;passOrEnd();render();},300)}
+
+document.getElementById('new').onclick=init;document.getElementById('mode').onchange=e=>{mode=e.target.value;init()};init();
+</script>
+</body>
+</html>
